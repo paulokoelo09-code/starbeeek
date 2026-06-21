@@ -41,7 +41,7 @@ OUTPUT FORMAT (follow exactly):
 TARJIMA:
 [Natural Russian translation]"""
 
-QUICK_REPLIES = [
+DEFAULT_QUICK_REPLIES = [
     "Yaxshi, tushundim",
     "Keyin gaplashamiz",
     "Hozir band eman",
@@ -49,6 +49,11 @@ QUICK_REPLIES = [
     "Rahmat!",
     "Bilmadim, keyin aytaman"
 ]
+
+def get_quick_replies(context):
+    if "quick_replies" not in context.bot_data:
+        context.bot_data["quick_replies"] = DEFAULT_QUICK_REPLIES.copy()
+    return context.bot_data["quick_replies"]
 
 def format_ru_uz_result(text):
     lines = text.strip().split("\n")
@@ -119,15 +124,21 @@ async def call_ai(text, prompt):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        [InlineKeyboardButton("🇷🇺 Rus → O'zbek", callback_data="mode_ru_uz")],
-        [InlineKeyboardButton("🇺🇿 O'zbek → Rus", callback_data="mode_uz_ru")],
-        [InlineKeyboardButton("⚡ Tez javoblar", callback_data="quick_replies")],
+        [InlineKeyboardButton("🇷🇺 Rus -> O'zbek", callback_data="mode_ru_uz")],
+        [InlineKeyboardButton("🇺🇿 O'zbek -> Rus", callback_data="mode_uz_ru")],
+        [InlineKeyboardButton("Tez javoblar", callback_data="quick_replies")],
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(
-        "Salom! Rejimni tanlang:",
-        reply_markup=reply_markup
-    )
+    await update.message.reply_text("Salom! Rejimni tanlang:", reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def addreply_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Ishlatish: /addreply Matn\nMasalan: /addreply Kechroq javob beraman")
+        return
+    new_reply = " ".join(context.args)
+    replies = get_quick_replies(context)
+    replies.append(new_reply)
+    context.bot_data["quick_replies"] = replies
+    await update.message.reply_text("Qo'shildi: `" + new_reply + "`", parse_mode="Markdown")
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -135,30 +146,36 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if query.data == "mode_ru_uz":
         context.user_data["mode"] = "ru_uz"
-        await query.edit_message_text("🇷🇺 Rus tilidagi xabarni yuboring yoki forward qiling!")
+        await query.edit_message_text("Rus tilidagi xabarni yuboring yoki forward qiling!")
     elif query.data == "mode_uz_ru":
         context.user_data["mode"] = "uz_ru"
-        await query.edit_message_text("🇺🇿 O'zbek tilidagi xabarni yuboring — rus tiliga tarjima qilaman!")
+        await query.edit_message_text("O'zbek tilidagi xabarni yuboring!")
     elif query.data == "quick_replies":
+        replies = get_quick_replies(context)
         keyboard = []
-        for reply in QUICK_REPLIES:
-            keyboard.append([InlineKeyboardButton(reply, callback_data="qr_" + reply)])
-        keyboard.append([InlineKeyboardButton("🔙 Orqaga", callback_data="back")])
-        await query.edit_message_text("⚡ Tez javobni tanlang:", reply_markup=InlineKeyboardMarkup(keyboard))
+        for i, reply in enumerate(replies):
+            keyboard.append([InlineKeyboardButton(reply, callback_data="qr_" + str(i))])
+        keyboard.append([InlineKeyboardButton("Orqaga", callback_data="back")])
+        await query.edit_message_text("Tez javobni tanlang:", reply_markup=InlineKeyboardMarkup(keyboard))
     elif query.data.startswith("qr_"):
-        reply_text = query.data[3:]
-        await query.edit_message_text("📋 Nusxa oling:\n\n`" + reply_text + "`", parse_mode="Markdown")
+        idx = int(query.data[3:])
+        replies = get_quick_replies(context)
+        uz_text = replies[idx]
+        msg = await query.edit_message_text("Tarjima qilinmoqda...")
+        raw = await call_ai("Uzbek message:\n\n" + uz_text, UZ_TO_RU_PROMPT)
+        result = format_uz_ru_result(raw)
+        await msg.edit_text(result, parse_mode="Markdown")
     elif query.data == "back":
         keyboard = [
-            [InlineKeyboardButton("🇷🇺 Rus → O'zbek", callback_data="mode_ru_uz")],
-            [InlineKeyboardButton("🇺🇿 O'zbek → Rus", callback_data="mode_uz_ru")],
-            [InlineKeyboardButton("⚡ Tez javoblar", callback_data="quick_replies")],
+            [InlineKeyboardButton("🇷🇺 Rus -> O'zbek", callback_data="mode_ru_uz")],
+            [InlineKeyboardButton("🇺🇿 O'zbek -> Rus", callback_data="mode_uz_ru")],
+            [InlineKeyboardButton("Tez javoblar", callback_data="quick_replies")],
         ]
         await query.edit_message_text("Rejimni tanlang:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mode = context.user_data.get("mode", "ru_uz")
-    msg = await update.message.reply_text("⏳ Tahlil qilinmoqda...")
+    msg = await update.message.reply_text("Tahlil qilinmoqda...")
     try:
         if mode == "ru_uz":
             raw = await call_ai("Russian message:\n\n" + update.message.text, RU_TO_UZ_PROMPT)
@@ -169,10 +186,10 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.edit_text(result, parse_mode="Markdown")
     except Exception as e:
         await msg.edit_text("Xato: " + str(e))
-        print("XATO: " + str(e))
 
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("addreply", addreply_command))
 app.add_handler(CallbackQueryHandler(button_handler))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
 print("Bot ishga tushdi!")
