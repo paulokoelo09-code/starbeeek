@@ -41,7 +41,7 @@ OUTPUT FORMAT (follow exactly):
 TARJIMA:
 [Natural Russian translation]"""
 
-DEFAULT_QUICK_REPLIES⚡️ = [
+DEFAULT_QUICK_REPLIES = [
     "Yaxshi, tushundim",
     "Keyin gaplashamiz",
     "Hozir band eman",
