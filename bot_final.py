@@ -47,8 +47,8 @@ DEFAULT_QUICK_REPLIES = [
     "Hozir band eman",
     "Albatta, xop",
     "Rahmat!",
-    "Bilmadim, keyin aytaman"
-    "Salom, ahvollaring qalay"
+    "Bilmadim, keyin aytaman",
+    "Salom, ahvollaring qalay",
     "Nima bilan bandsan"
 ]
 
