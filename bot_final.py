@@ -1,29 +1,28 @@
 import logging
 import httpx
 import os
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
 logging.basicConfig(level=logging.INFO)
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+MODEL = "nex-agi/nex-n2-pro:free"
 
-SYSTEM_PROMPT = """You are a translation and reply assistant.
+RU_TO_UZ_PROMPT = """You are a professional translator and reply assistant.
 
-TASK:
-Step 1: Translate the given Russian message into Uzbek language.
-Step 2: Write 3 reply options IN RUSSIAN LANGUAGE ONLY (not Uzbek, not English - RUSSIAN).
+The user will send you a Russian message. Do the following:
+Step 1: Translate the Russian message into natural Uzbek (not word-for-word, but how a native Uzbek speaker would say it).
+Step 2: Write 3 reply options IN RUSSIAN LANGUAGE ONLY. Replies must be in Russian, not Uzbek!
 
-The replies should sound natural, human, and slightly polite even if the original was rude or casual.
-
-OUTPUT FORMAT (follow exactly, no deviations):
+OUTPUT FORMAT (follow exactly):
 
 TARJIMA:
-[Uzbek translation of the message]
+[Natural Uzbek translation]
 
 JAVOB1:
-[Reply in RUSSIAN - formal and polite]
+[Reply in RUSSIAN - polite and formal]
 
 JAVOB2:
 [Reply in RUSSIAN - friendly and warm]
@@ -31,9 +30,27 @@ JAVOB2:
 JAVOB3:
 [Reply in RUSSIAN - short and casual]
 
-CRITICAL: JAVOB1, JAVOB2, JAVOB3 must be written in RUSSIAN language only!"""
+IMPORTANT: JAVOB1, JAVOB2, JAVOB3 MUST BE IN RUSSIAN LANGUAGE ONLY!"""
 
-def format_result(text):
+UZ_TO_RU_PROMPT = """You are a professional translator.
+
+The user will send you an Uzbek message. Translate it into natural Russian (not word-for-word, but how a native Russian speaker would say it).
+
+OUTPUT FORMAT (follow exactly):
+
+TARJIMA:
+[Natural Russian translation]"""
+
+QUICK_REPLIES = [
+    "Yaxshi, tushundim",
+    "Keyin gaplashamiz",
+    "Hozir band eman",
+    "Albatta, xop",
+    "Rahmat!",
+    "Bilmadim, keyin aytaman"
+]
+
+def format_ru_uz_result(text):
     lines = text.strip().split("\n")
     tarjima = ""
     javoblar = {"JAVOB1": "", "JAVOB2": "", "JAVOB3": ""}
@@ -72,27 +89,83 @@ def format_result(text):
     result += "`" + javoblar["JAVOB3"].strip() + "`"
     return result
 
-async def call_ai(text):
+def format_uz_ru_result(text):
+    lines = text.strip().split("\n")
+    tarjima = ""
+    current = None
+    for line in lines:
+        line = line.strip()
+        if line.startswith("TARJIMA:"):
+            current = "TARJIMA"
+            val = line.replace("TARJIMA:", "").strip()
+            if val:
+                tarjima = val
+        elif line and current == "TARJIMA":
+            tarjima += " " + line
+    return "🇺🇿➡️🇷🇺 *TARJIMA:*\n`" + tarjima.strip() + "`"
+
+async def call_ai(text, prompt):
     async with httpx.AsyncClient(timeout=60) as client:
         r = await client.post(
             "https://openrouter.ai/api/v1/chat/completions",
             headers={"Authorization": "Bearer " + OPENROUTER_API_KEY, "Content-Type": "application/json"},
-            json={"model": "nex-agi/nex-n2-pro:free", "messages": [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": "Russian message:\n\n" + text}]}
+            json={"model": MODEL, "messages": [{"role": "system", "content": prompt}, {"role": "user", "content": text}]}
         )
         data = r.json()
         if "choices" in data:
-            raw = data["choices"][0]["message"]["content"]
-            return format_result(raw)
+            return data["choices"][0]["message"]["content"]
         else:
             return "Xato: " + str(data.get("error", {}).get("message", str(data)))
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Salom! Rus tilidagi xabarni yuboring yoki forward qiling!")
+    keyboard = [
+        [InlineKeyboardButton("🇷🇺 Rus → O'zbek", callback_data="mode_ru_uz")],
+        [InlineKeyboardButton("🇺🇿 O'zbek → Rus", callback_data="mode_uz_ru")],
+        [InlineKeyboardButton("⚡ Tez javoblar", callback_data="quick_replies")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        "Salom! Rejimni tanlang:",
+        reply_markup=reply_markup
+    )
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "mode_ru_uz":
+        context.user_data["mode"] = "ru_uz"
+        await query.edit_message_text("🇷🇺 Rus tilidagi xabarni yuboring yoki forward qiling!")
+    elif query.data == "mode_uz_ru":
+        context.user_data["mode"] = "uz_ru"
+        await query.edit_message_text("🇺🇿 O'zbek tilidagi xabarni yuboring — rus tiliga tarjima qilaman!")
+    elif query.data == "quick_replies":
+        keyboard = []
+        for reply in QUICK_REPLIES:
+            keyboard.append([InlineKeyboardButton(reply, callback_data="qr_" + reply)])
+        keyboard.append([InlineKeyboardButton("🔙 Orqaga", callback_data="back")])
+        await query.edit_message_text("⚡ Tez javobni tanlang:", reply_markup=InlineKeyboardMarkup(keyboard))
+    elif query.data.startswith("qr_"):
+        reply_text = query.data[3:]
+        await query.edit_message_text("📋 Nusxa oling:\n\n`" + reply_text + "`", parse_mode="Markdown")
+    elif query.data == "back":
+        keyboard = [
+            [InlineKeyboardButton("🇷🇺 Rus → O'zbek", callback_data="mode_ru_uz")],
+            [InlineKeyboardButton("🇺🇿 O'zbek → Rus", callback_data="mode_uz_ru")],
+            [InlineKeyboardButton("⚡ Tez javoblar", callback_data="quick_replies")],
+        ]
+        await query.edit_message_text("Rejimni tanlang:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = await update.message.reply_text("Tahlil qilinmoqda...")
+    mode = context.user_data.get("mode", "ru_uz")
+    msg = await update.message.reply_text("⏳ Tahlil qilinmoqda...")
     try:
-        result = await call_ai(update.message.text)
+        if mode == "ru_uz":
+            raw = await call_ai("Russian message:\n\n" + update.message.text, RU_TO_UZ_PROMPT)
+            result = format_ru_uz_result(raw)
+        else:
+            raw = await call_ai("Uzbek message:\n\n" + update.message.text, UZ_TO_RU_PROMPT)
+            result = format_uz_ru_result(raw)
         await msg.edit_text(result, parse_mode="Markdown")
     except Exception as e:
         await msg.edit_text("Xato: " + str(e))
@@ -100,6 +173,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
+app.add_handler(CallbackQueryHandler(button_handler))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
 print("Bot ishga tushdi!")
 app.run_polling()
