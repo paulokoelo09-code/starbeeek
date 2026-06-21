@@ -48,6 +48,8 @@ DEFAULT_QUICK_REPLIES = [
     "Albatta, xop",
     "Rahmat!",
     "Bilmadim, keyin aytaman"
+    "Salom, ahvollaring qalay"
+    "Nima bilan bandsan"
 ]
 
 def get_quick_replies(context):
