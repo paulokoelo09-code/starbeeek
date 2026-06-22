@@ -8,7 +8,7 @@ logging.basicConfig(level=logging.INFO)
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
-MODEL = "google/gemma-4-31b-it:free"
+MODEL = "openai/gpt-oss-20b:free"
 
 RU_TO_UZ_PROMPT = """You are a professional translator and reply assistant.
 
